@@ -1,0 +1,19 @@
+{
+  "name": "pj13-preview",
+  "version": "0.1.0",
+  "description": "Pj13 · 文献精读预览（web 容器 backend：无依赖 node 静态服务器托管前端骨架 + /api/* 接口契约占位）",
+  "backend": {
+    "name": "Pj13 精读预览",
+    "cmd": ["node", "server.mjs"],
+    "cwd": "./backend",
+    "port": 0,
+    "idleMinutes": 30,
+    "readyPath": "/index.html"
+  },
+  "quoteActions": [
+    { "id": "vocab", "title": "生成单词卡", "icon": "pen" },
+    { "id": "anno", "title": "创建批注", "icon": "bubble" }
+  ],
+  "owner": "Pj13-文献阅读",
+  "hotReload": true
+}

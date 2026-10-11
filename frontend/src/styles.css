@@ -1,0 +1,1199 @@
+/* Pj13 预览前端 · floria 风格（与网关 / 整个前端统一）
+   主题：极简 · 黑白灰线条 · 唯一彩色 = 蓝（同网关 floria 发送按钮蓝）
+   布局：PDF 全屏 + 左侧生词笔记抽屉 + 锚定批注卡 + 右键菜单
+   z 序：scroll=1 < drawer=20 < card=30 < menu=40 < topbar=50 */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --rail-bg: #fafafa;
+  --border: #ececec;
+  --border-soft: #f2f2f3;
+  --text: #1c1c1e;
+  --text-2: #8e8e93;
+  --text-3: #c4c4c9;
+  --hover: #f2f2f4;
+  --active: #e9e9ec;
+  --blue: #4d6bfe;
+  --blue-hover: #3b5bfd;
+  --shadow: 0 10px 34px rgba(0, 0, 0, 0.14);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.08);
+  --radius: 12px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  /* iPad/iOS：Safari 默认 text autosizing 会放大文本层 span 字号 → 与 canvas 错位、
+     生词标色整体漂移（桌面无此机制所以验证不到）。锁 100% 禁止自动调整。 */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+button {
+  font-family: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pv-app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* ---------------- 顶栏 ---------------- */
+.pv-topbar {
+  height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  z-index: 50;
+  gap: 12px;
+}
+.pv-topbar-left,
+.pv-topbar-mid,
+.pv-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pv-topbar-mid {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+.pv-topbar-title {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+/* 窄屏（iPad Safari 侧栏/分屏挤压视口）：左右两段保持自然宽度，中部 select 独自收缩；
+   标题隐藏省 ~130px，防「笔记/适宽/页码」被压成竖排换行 */
+.pv-topbar-left,
+.pv-topbar-right {
+  flex: none;
+}
+@media (max-width: 960px) {
+  .pv-topbar {
+    padding: 0 10px;
+    gap: 8px;
+  }
+  .pv-topbar-title {
+    display: none;
+  }
+}
+.pv-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 13px;
+  white-space: nowrap;
+  flex: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pv-icon-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+  border-color: #e0e0e3;
+}
+.pv-icon-btn:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+.pv-drawer-tick {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--active);
+  border: 1px solid var(--border);
+  transition: background 0.2s, border-color 0.2s;
+}
+.pv-drawer-tick.on {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+/* 面包屑：素材库 / 子目录 / 文件名；每段可点回退到该层（末段为当前位置，不可点） */
+.pv-crumb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+}
+.pv-crumb-item {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.pv-crumb-seg {
+  display: inline-flex;
+  align-items: center;
+  max-width: 260px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s, color 0.15s;
+}
+.pv-crumb-seg.link:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.pv-crumb-seg.link:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+.pv-crumb-seg.cur {
+  color: var(--text);
+  font-weight: 500;
+}
+.pv-crumb-seg:disabled {
+  cursor: default;
+}
+.pv-crumb-sep {
+  color: var(--text-3);
+  flex: none;
+}
+
+.pv-page-info {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.pv-topbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+}
+.pv-zoom {
+  font-family: var(--mono);
+  color: var(--text-2);
+  font-size: 12.5px;
+  min-width: 44px;
+  text-align: center;
+}
+.pv-state {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.pv-state-err {
+  color: var(--blue-hover);
+  background: rgba(77, 107, 254, 0.08);
+  border: 1px solid rgba(77, 107, 254, 0.3);
+}
+
+/* ---------------- 主体 / PDF 滚动区 ---------------- */
+/* body = 左右分栏：PDF 区 + 生词抽屉。抽屉宽度计入布局，PDF 只在剩余区居中，不被遮挡 */
+.pv-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+.pv-main {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+}
+.pv-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 1px;
+  display: flex;
+  flex-direction: column;
+  /* 勿用 align-items:center：页面放大超宽时 flex center 把溢出劈到左右两侧，
+     滚动原点在左 → 左侧溢出不可达（左边缘永远看不到、拖不回来），
+     160% 放大横滑拖不到边的根因。居中交给 .pv-page 的 auto margin（安全居中） */
+  gap: 10px;
+  z-index: 1;
+  background: var(--rail-bg);
+}
+.pv-hint {
+  color: var(--text-3);
+  padding: 40px 0;
+  font-size: 13px;
+  margin-inline: auto;
+}
+.pv-page {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 6px 20px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e6e6e9;
+  flex: none;
+  /* 安全居中：auto margin 吸收正空闲 → 与 center 视觉一致；溢出（负空闲）时
+     margin 归零 → 溢出全落到右侧，scrollLeft 0~溢出量两端边缘都可拖达 */
+  margin-inline: auto;
+}
+.pv-page-holder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.pv-page canvas {
+  display: block;
+}
+/* pdf.js 文本层：容器绝对覆盖页面；span 必须 absolute+white-space:pre，
+   否则 pdfjs 内联的 left/top/transform 不生效 → 生词标色严重偏移（用户反馈 bug）。
+   z-index:3 → 文本层在最上（透明可选中/可 tap），标色层(z2)/canvas 在下：
+   iPad 长按命中无文本的 mark overlay 会导致原生选择无法启动（用户反馈 bug） */
+.pv-textlayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  z-index: 3;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+.pv-textlayer span {
+  color: transparent !important;
+  position: absolute;
+  white-space: pre;
+  transform-origin: 0 0;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 生词标色：视觉 = .pv-mark 矩形（坐标来自 canvas fillText 采样，与 canvas 同一坐标系，
+   逐像素贴合）。DOM 文本层无论换什么字体都复现不了 PDF 内容流的逐字 TJ 定位
+   （桌面半字符 / iPad 一字符残余的根因），故文本层不再承载视觉。
+   .pv-hit 保留为文本层内隐形交互锚（右键 closest 命中、兼容既有交互）。
+   标记层 z2：canvas 之上、文本层(z3)之下，pointer-events:none 不挡长按选择 */
+.pv-marks {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pv-mark {
+  position: absolute;
+  background: rgba(77, 107, 254, 0.16);
+  border-bottom: 1.5px solid #7d8bfd;
+  border-radius: 1.5px;
+}
+/* 生成中的词（App busy 卡）：橘色提示，完成转蓝 / 取消消失 */
+.pv-mark-pending {
+  background: rgba(255, 149, 0, 0.18);
+  border-bottom-color: #ff9500;
+}
+.pv-textlayer span.pv-hit {
+  position: static;
+  display: inline;
+  background: transparent;
+}
+
+/* 选区高亮：z1 夹在 canvas 与标色层(z2)之间。原生 ::selection 蓝底隐藏——
+   DOM 文本层字形与 canvas 有固有偏差（通用字体 + 整 item scaleX 补偿复现不了
+   内容流逐字 TJ 定位，实测词级 ~2-6px），蓝底画在 DOM 字形上偏离 PDF 词形
+   （user 反馈选中词蓝底偏移）。高亮矩形改由 canvas 采样坐标吸附（snapSelectionRect），
+   文本选择行为桌面不变；触屏选择改程序化接管（文末 pointer:coarse 块） */
+.pv-selection {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pv-selection div {
+  position: absolute;
+  background: rgba(59, 130, 246, 0.28);
+  border-radius: 1.5px;
+}
+.pv-textlayer ::selection {
+  background: transparent;
+}
+.pv-textlayer::selection {
+  background: transparent;
+}
+
+/* ---------------- 生词笔记抽屉 ---------------- */
+.pv-drawer {
+  width: 320px;
+  flex: none;
+  order: -1; /* 左栏（DOM 里在 main 之后，靠 order 排到最前=左侧） */
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 8px 0 30px rgba(0, 0, 0, 0.06);
+}
+.pv-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.pv-drawer-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.pv-drawer-count {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--blue);
+  background: rgba(77, 107, 254, 0.1);
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+.pv-drawer-close {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.pv-drawer-close:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.pv-drawer-body {
+  flex: 1;
+  overflow: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pv-drawer-empty {
+  color: var(--text-3);
+  text-align: center;
+  padding: 30px 0;
+  font-size: 13px;
+}
+.pv-note {
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  font-family: inherit;
+  color: inherit;
+}
+.pv-note:hover {
+  border-color: rgba(77, 107, 254, 0.55);
+  background: var(--hover);
+}
+.pv-note-term {
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text);
+}
+.pv-note-meaning {
+  font-size: 12.5px;
+  color: var(--text-2);
+  margin: 3px 0;
+}
+.pv-note-sent {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pv-note-anchor {
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.pv-drawer-foot {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+/* ---------------- 锚定批注卡 ---------------- */
+.pv-card {
+  position: fixed;
+  width: 344px;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 16px 48px rgba(0, 0, 0, 0.14);
+  z-index: 30;
+  font-size: 13px;
+  animation: pv-card-in 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+@keyframes pv-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.98);
+  }
+}
+.pv-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px 16px 12px;
+}
+.pv-card-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pv-card-term {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  line-height: 1.2;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.pv-card-term::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--blue);
+  flex: none;
+}
+.pv-card-mean {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.pv-card-speak {
+  margin-left: auto;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--text-3);
+  display: grid;
+  place-items: center;
+  transition: color 0.15s, background 0.15s;
+}
+.pv-card-speak:hover {
+  color: var(--blue);
+  background: rgba(77, 107, 254, 0.08);
+}
+.pv-card-speak.speaking {
+  color: var(--blue);
+}
+.pv-card-close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--text-3);
+  font-size: 16px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  transition: color 0.15s, background 0.15s;
+}
+.pv-card-close:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.pv-card-roots {
+  padding: 10px 16px 13px;
+  border-top: 1px solid var(--border-soft);
+}
+.pv-card-overline {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+.pv-card-roots ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.pv-card-roots li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.pv-root-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--blue);
+  background: rgba(77, 107, 254, 0.08);
+  padding: 1px 7px;
+  border-radius: 5px;
+  flex: none;
+}
+.pv-root-desc {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.pv-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-top: 1px solid var(--border-soft);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.pv-card-foot-sep {
+  color: var(--text-3);
+  opacity: 0.6;
+}
+.pv-card-body {
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pv-card-loading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+@keyframes pv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.pv-spin {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  flex: none;
+  animation: pv-spin 0.7s linear infinite;
+}
+.pv-card-muted {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.pv-card-hint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pv-card {
+    animation: none;
+  }
+  .pv-spin {
+    animation-duration: 1.5s;
+  }
+}
+
+/* ---------------- 批注层（右侧悬浮卡） ---------------- */
+/* 卡片落在纸张右侧空白区、与所注句子的末行对齐（不画引线，靠竖向对齐对应）；
+   折叠态只是一个 22px 气泡标记（不渲染正文），悬停/点按才展开渲染 markdown */
+.pv-anno-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  pointer-events: none; /* 只有卡片本体接收事件，别挡文本选择 */
+}
+/* 折叠态永远是 22px 气泡标记（卡片以它为锚，位置不随展开位移）；展开卡是它的绝对定位
+   子节点，一律向右展开、按右侧净空收窄（见 AnnoLayer.tsx） */
+.pv-anno {
+  position: absolute;
+  pointer-events: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+  cursor: pointer;
+}
+.pv-anno.open {
+  cursor: default;
+  z-index: 2; /* 展开时压过相邻标记，避免互相遮挡 */
+}
+.pv-anno-mark {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  color: #e5484d;
+  background: rgba(229, 72, 77, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(229, 72, 77, 0.35);
+}
+.pv-anno:not(.open) {
+  display: grid;
+  place-items: center;
+}
+.pv-anno.open .pv-anno-mark {
+  background: var(--panel);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+.pv-anno-body {
+  position: absolute;
+  top: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06), 0 16px 40px rgba(0, 0, 0, 0.16);
+  padding: 8px 12px 12px;
+  animation: pv-anno-in 0.14s ease-out;
+}
+@keyframes pv-anno-in {
+  from {
+    opacity: 0;
+  }
+}
+.pv-anno-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+.pv-anno-author {
+  font-weight: 600;
+  color: var(--text);
+}
+.pv-anno-sep {
+  color: var(--text-3);
+}
+.pv-anno-time {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.pv-anno-quote {
+  border-left: 2px solid rgba(229, 72, 77, 0.45);
+  padding: 2px 0 2px 8px;
+  margin-bottom: 8px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* 正文：用户手写 markdown 的渲染结果（md.ts） */
+.pv-anno-md {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.pv-anno-md > *:not(:last-child) {
+  margin-bottom: 6px;
+}
+.pv-anno-md h1,
+.pv-anno-md h2,
+.pv-anno-md h3,
+.pv-anno-md h4,
+.pv-anno-md h5,
+.pv-anno-md h6 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.pv-anno-md ul,
+.pv-anno-md ol {
+  padding-left: 18px;
+}
+.pv-anno-md li {
+  margin-bottom: 2px;
+}
+.pv-anno-md code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  background: var(--hover);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.pv-anno-md pre {
+  background: var(--hover);
+  padding: 8px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.pv-anno-md pre code {
+  background: none;
+  padding: 0;
+}
+.pv-anno-md blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+  color: var(--text-2);
+}
+.pv-anno-md a {
+  color: var(--blue);
+}
+.pv-anno-md hr {
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------------- 新建批注编辑卡 ---------------- */
+.pv-composer {
+  position: fixed;
+  width: 360px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 16px 48px rgba(0, 0, 0, 0.16);
+  z-index: 31;
+  padding: 12px 14px 12px;
+  animation: pv-card-in 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.pv-composer-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.pv-composer-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.pv-composer-meta {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-left: auto;
+}
+.pv-composer-quote {
+  border-left: 2px solid rgba(229, 72, 77, 0.45);
+  padding: 2px 0 2px 8px;
+  margin-bottom: 8px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pv-composer-input {
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 10px;
+}
+.pv-composer-input:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+.pv-composer-err {
+  margin-top: 7px;
+  font-size: 12px;
+  color: var(--blue-hover);
+}
+.pv-composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.pv-composer-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-right: auto;
+}
+.pv-btn {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pv-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.pv-btn-primary {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+.pv-btn-primary:hover {
+  background: var(--blue-hover);
+  border-color: var(--blue-hover);
+  color: #fff;
+}
+.pv-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------------- 目录页（素材库浏览） ---------------- */
+/* 铺满 .pv-main：头部一行统计 + 下面的行列表（行 = 图标 + 名称 + 右侧元信息） */
+.pv-cat {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--rail-bg);
+  padding: 18px 16px 40px;
+}
+.pv-cat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 980px;
+  margin: 0 auto 10px;
+}
+.pv-cat-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-cat-count {
+  color: var(--text-2);
+  font-size: 12.5px;
+  flex: none;
+}
+.pv-cat-list {
+  max-width: 980px;
+  margin: 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.pv-cat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  transition: background 0.12s;
+}
+.pv-cat-row:last-child {
+  border-bottom: none;
+}
+.pv-cat-row:hover {
+  background: var(--hover);
+}
+.pv-cat-row:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+.pv-cat-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-3);
+}
+.pv-cat-icon.dir {
+  color: #a8a8ae;
+}
+.pv-cat-icon.pdf {
+  color: #8d8d94;
+}
+.pv-cat-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+}
+.pv-cat-row.dir .pv-cat-name {
+  font-weight: 600;
+}
+.pv-cat-row.last .pv-cat-name::after {
+  content: "上次阅读";
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--blue);
+  background: rgba(77, 107, 254, 0.08);
+  border: 1px solid rgba(77, 107, 254, 0.24);
+}
+.pv-cat-meta {
+  flex: none;
+  color: var(--text-3);
+  font-size: 12px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pv-cat-arrow {
+  flex: none;
+  color: var(--text-3);
+  font-size: 16px;
+  line-height: 1;
+}
+.pv-cat-empty {
+  max-width: 980px;
+  margin: 24px auto;
+  padding: 22px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.pv-cat-empty.pv-cat-err {
+  color: var(--blue-hover);
+  background: rgba(77, 107, 254, 0.06);
+  border: 1px solid rgba(77, 107, 254, 0.3);
+  border-style: solid;
+}
+
+/* ---------------- 编辑 / 删除（批注气泡 + 生词卡共用） ---------------- */
+/* 卡上动作行：编辑/删除为小号文字按钮；删除走两段式内联确认（点了变红，4s 复原） */
+.pv-mini {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  background: var(--panel);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pv-mini:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.pv-mini:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pv-mini.danger {
+  color: #fff;
+  background: #e5484d;
+  border-color: #e5484d;
+}
+.pv-mini.danger:hover {
+  background: #d13b40;
+  border-color: #d13b40;
+  color: #fff;
+}
+.pv-anno-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.pv-anno-edited {
+  color: var(--text-3);
+  font-size: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  padding: 0 4px;
+}
+
+/* 生词卡：底栏（左锚点信息 / 右动作）
+   —— 原 .pv-card-foot 是独占一行；嵌动作行后改成两端分布 */
+.pv-card-foot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--border-soft);
+  padding-right: 12px;
+}
+.pv-card-foot-row .pv-card-foot {
+  border-top: none;
+  padding-right: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+/* 文件名可能很长：只让它拉伸/截断成一行，其余「第 N 页 / 已编辑」保持原样不换行，
+   别把「编辑/删除」挤到第二行 */
+.pv-card-foot-row .pv-card-foot > span {
+  white-space: nowrap;
+  flex: none;
+}
+.pv-card-foot-row .pv-card-foot > span:first-child {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pv-card-foot-row .pv-card-actions {
+  border-top: none;
+  padding: 0;
+  flex: none;
+}
+.pv-card-edited {
+  color: var(--text-3);
+  font-size: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  padding: 0 4px;
+}
+/* 卡片编辑态：释义 / 词根两个 textarea（词根每行一条） */
+.pv-card-edit textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+.pv-card-edit textarea.pv-edit-roots {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.pv-card-edit textarea:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+.pv-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.pv-card-err {
+  color: var(--blue-hover);
+}
+/* 批注气泡操作失败的轻提示（气泡里没位置展示错误）：底部居中，4s 自动消失 */
+.pv-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: #fff;
+  font-size: 12.5px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  box-shadow: var(--shadow);
+  z-index: 60;
+  animation: pv-card-in 0.16s ease-out;
+}
+
+/* ---------------- 滚动条 ---------------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #c8c8cc;
+  border-radius: 6px;
+  border: 2px solid var(--rail-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #aeaeb4;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ---------------- 触屏：选择程序化接管 ---------------- */
+/* iPad 等触屏设备禁原生文本选择：原生长按选择必弹系统 callout（拷贝/查询/分享/
+   翻译，网页无法隐藏也无法插入自定义项，user 反馈「苹果套件劫持」）。user-select:none
+   让原生选择/放大镜/callout 失去触发源；选择由 JS 接管——长按取词 + addRange
+   程序化选区（PdfViewer long-press effect，程序化选区不触发系统菜单，且照样触发
+   selectionchange → 蓝底吸附重画管线原样工作）。
+   注意 .pv-scroll .pv-textlayer span 需特异性压过桌面规则的 .pv-textlayer span(text)。
+
+   **媒体查询在 iPad 上判假**（iPadOS Safari 谎报 pointer:fine/hover:hover）⇒ 同一套规则还要挂在
+   JS 落的根元素类 `.pv-touch` 上（判据见 src/touch.ts，启动时 applyTouchClass）。两处必须同时改，
+   少一处就是「iPad 上原生选择没被禁 → 系统 callout 劫持、长按监听也没挂」。 */
+@media (pointer: coarse) {
+  .pv-scroll,
+  .pv-scroll *,
+  .pv-scroll .pv-textlayer span {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
+.pv-touch .pv-scroll,
+.pv-touch .pv-scroll *,
+.pv-touch .pv-scroll .pv-textlayer span {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
