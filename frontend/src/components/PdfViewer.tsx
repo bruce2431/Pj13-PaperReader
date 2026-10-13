@@ -221,6 +221,34 @@ function charAdvances(fs: number, str: string): number[] {
   return out
 }
 
+/** 上标引用号边界（buildLines 行组装用）：两字符字号比 <0.8 且小字号一方基线抬高
+ *  （视口 y 更小）>0.1×大字号 → 两者之间是词界。Nature 式无括号引用号（fs≈0.57×、
+ *  抬 ~0.24em）必拆；同字号数字（ConvS2S）与降低基线的下标（H2O、h_t）不是引用，
+ *  不拆（词内下标是词形的一部分）。只拆「抬高」：x² 类上标数学一并拆出，可接受。 */
+function isCiteBoundary(p: { y: number; s: number }, c: { y: number; s: number }): boolean {
+  const hi = Math.max(p.s, c.s)
+  if (!(hi > 0) || Math.min(p.s, c.s) >= 0.8 * hi) return false
+  const dy = c.s < p.s ? p.y - c.y : c.y - p.y // 小字号一方相对大字号的抬升量
+  return dy > 0.1 * hi
+}
+
+/** 词尾引用号修剪（仅用于词形/term 推导；mark 几何与选区高亮不动）。isCiteBoundary
+ *  拆出 "piperazines 25," 后，locateWordFrag 的整词扩展仍会把 "25,"（句逗同小字号、
+ *  与 25 粘连）带进 frag → term 成 "piperazines25,"。从词尾反向吃掉「字号明显小于
+ *  行主字号 && 字符 ∈ 引用号字符类（数字/括号/引号/逗号/空格）」的盒子，遇主字号
+ *  词字符即停；至少保留 1 字符（首盒字号作 ref，纯引用号选段自身不再缩）。 */
+function trimCiteTail(line: Line, s: number, e: number): number {
+  const ref = line.boxes[s]?.s ?? line.s
+  let end = e
+  while (end > s + 1) {
+    const b = line.boxes[end - 1]
+    const ch = line.text[end - 1]
+    if (b && b.s < 0.8 * Math.max(ref, 1) && /[0-9\])('’，, ]/.test(ch)) end--
+    else break
+  }
+  return end
+}
+
 /** 从「canvas 采样位置 + textContent Unicode 文本」重建每字符盒（CSS 像素）。
  *  canvas 的 fillText 只画可见字形，且内嵌字体下入参是字体私有编码（PUA），读不出
  *  文本 → 文本取 textContent.items（Unicode），位置取 paints（canvas 真实落点）。
@@ -377,16 +405,22 @@ function buildLines(
     cl.sort((a, b) => a.x0 - b.x0)
     let text = ''
     const boxes: { x0: number; x1: number; s: number; approx?: boolean }[] = []
-    let prevEnd: number | null = null
+    let prev: { x0: number; x1: number; y: number; s: number; approx?: boolean } | null = null
     for (const it of cl) {
-      // 跨 item 的词间空格不会出现在字符流里 → x 间隙 > 0.15em 处补合成空格
-      if (prevEnd !== null && it.x0 - prevEnd > 0.15 * it.s) {
-        text += ' '
-        boxes.push({ x0: prevEnd, x1: it.x0, s: it.s, approx: it.approx })
+      // 跨 item 的词间空格不会出现在字符流里 → x 间隙 > 0.15em 处补合成空格。
+      // 另一处词界：上标引用号（Nature 式 25）字号小且基线抬高，x 上却紧贴前词
+      //（studies22）→ 不补空格行文本就粘成 "studies22"，选词/定位全脏。见 isCiteBoundary。
+      if (prev) {
+        const gapSplit = it.x0 - prev.x1 > 0.15 * it.s
+        const citeSplit = isCiteBoundary(prev, it)
+        if (gapSplit || citeSplit) {
+          text += ' '
+          boxes.push({ x0: prev.x1, x1: it.x0, s: it.s, approx: it.approx })
+        }
       }
       text += it.ch
       boxes.push({ x0: it.x0, x1: it.x1, s: it.s, approx: it.approx })
-      prevEnd = it.x1
+      prev = it
     }
     lines.push({ y: cl[0].y, s: cl[0].s, text, boxes })
   }
@@ -1487,8 +1521,11 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
       const lx = r0.left - first.pr.left
       const ly = r0.top - first.pr.top + r0.height / 2
       const loc = lines && !/\s/.test(text) ? locateWordFrag(text, lines, lx, ly) : null
+      // 词尾引用号修剪：整词扩展会把拆出来的 " 25,"（引用号+粘连句逗）一并算进词形
+      // → term 成 "piperazines25,"（user 反馈 10-13）。修剪后词形与锚点都只算主词本体。
+      const eTrim = loc ? trimCiteTail(loc.line, loc.s, loc.e) : 0
       const word = loc
-        ? loc.line.text.slice(loc.s, loc.e).replace(/ /g, '')
+        ? loc.line.text.slice(loc.s, eTrim).replace(/ /g, '')
         : (wordFromLines(lines, lx, ly) ?? text)
       // 锚点必须与 word 同源：命中词时取该词几何中心，否则点击点仍停在 DOM 选区左端
       //（会落进前一个词的边界）→ 标记端 Tier1 anchorOcc 按点取最近词，会把标记打到
@@ -1496,7 +1533,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
       let ax = lx
       let ay = ly
       if (loc) {
-        const bs = loc.line.boxes.slice(loc.s, loc.e)
+        const bs = loc.line.boxes.slice(loc.s, eTrim)
         if (bs.length) {
           ax = (bs[0].x0 + bs[bs.length - 1].x1) / 2
           ay = loc.line.y - 0.29 * loc.line.s
@@ -1587,7 +1624,9 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
       let loc: ReturnType<typeof locateWordFrag> = null
       if (frag && lines) {
         loc = locateWordFrag(frag, lines, lx, ly)
-        if (loc) frag = loc.line.text.slice(loc.s, loc.e).replace(/ /g, '')
+        // 只修 frag（词形/term）；manualSel 蓝底仍用完整 loc 范围（视觉反馈不缩水）
+        if (loc)
+          frag = loc.line.text.slice(loc.s, trimCiteTail(loc.line, loc.s, loc.e)).replace(/ /g, '')
       }
       if (!frag) {
         frag = wordFromLines(lines, lx, ly) ?? ''
