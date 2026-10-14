@@ -55,12 +55,24 @@ export function AnnoLayer({ annos, scrollerRef, scale, onEdit, onDelete }: AnnoL
   const measure = useCallback(() => {
     const scroller = scrollerRef.current
     if (!scroller) return
-    setSize({ w: scroller.scrollWidth, h: scroller.scrollHeight })
+    // 层尺寸取【页元素实测外框】，绝不取 scroller.scrollWidth/scrollHeight：
+    // 本层是 scroller 的绝对定位子节点，用 scrollWidth 会把自己的宽度算进下一次测量 → 自指锁死。
+    // 只要某次（放大期/瞬时抖动）scrollWidth 超 clientWidth 哪怕 1px，层就永久留住那点溢出，
+    // 适宽后页已收窄、横向滚动却不消失（user 反馈「适宽下仍能左右滑」的根因）。
+    const sr = scroller.getBoundingClientRect()
+    let w = scroller.clientWidth
+    let h = scroller.clientHeight
+    for (const pageEl of Array.from(scroller.querySelectorAll<HTMLElement>('.pv-page'))) {
+      const pr = pageEl.getBoundingClientRect()
+      if (!(pr.width > 0)) continue
+      w = Math.max(w, pr.right - sr.left + scroller.scrollLeft)
+      h = Math.max(h, pr.bottom - sr.top + scroller.scrollTop)
+    }
+    setSize({ w, h })
     if (!annos.length) {
       setPos([])
       return
     }
-    const sr = scroller.getBoundingClientRect()
     const items: Pos[] = []
     for (const a of annos) {
       const pageEl = scroller.querySelector<HTMLElement>(`.pv-page[data-page="${a.page}"]`)
@@ -72,9 +84,11 @@ export function AnnoLayer({ annos, scrollerRef, scale, onEdit, onDelete }: AnnoL
       const pageLeft = pr.left - sr.left + scroller.scrollLeft
       const pageTop = pr.top - sr.top + scroller.scrollTop
       const endY = pageTop + (yr + hr / 2) * pr.height
-      // 标记贴纸张右侧 14px：位置固定不随展开变，展开卡由 Balloon 向右贴住标记排布
+      // 标记贴纸张右侧 14px：位置固定不随展开变，展开卡由 Balloon 向右贴住标记排布。
+      // 适宽时纸张几乎占满可视宽（右侧无白边），14px 会把气泡推出可视右缘 → 横向滚动。
+      // 夹到可视右缘内侧（此时本就在页面上，不会更差），标记永不越界撑出滚动条。
       const visRight = scroller.clientWidth + scroller.scrollLeft - 4
-      const left = pageLeft + pr.width + 14
+      const left = Math.min(pageLeft + pr.width + 14, Math.max(0, visRight - MARK))
       items.push({ anno: a, left, top: endY - MARK / 2, visRight })
     }
     // 同侧相邻批注竖向避让（折叠态只有 22px 高，密排时按顺序下推）

@@ -1009,30 +1009,6 @@ function wordAtPoint(x: number, y: number): { word: string; rect: ScreenRect; ra
   return { word, rect: { x: r.left, y: r.top, w: r.width, h: r.height }, range: wr }
 }
 
-/** 触屏长按链诊断角标（临时脚手架，问题定位后删）：iPad 无控制台可看，把每次触摸的
- *  关键判断直接写到屏幕左下角，用户截图即可定位「哪一步断的」。 */
-function touchDbg(line: string) {
-  try {
-    let el = document.getElementById('pv-touch-dbg')
-    if (!el) {
-      el = document.createElement('div')
-      el.id = 'pv-touch-dbg'
-      el.style.cssText =
-        'position:fixed;left:6px;bottom:6px;z-index:99999;background:rgba(0,0,0,.82);color:#7fe07f;' +
-        'font:11px/1.4 ui-monospace,Menlo,monospace;padding:4px 7px;border-radius:6px;max-width:92vw;' +
-        'white-space:pre-wrap;pointer-events:none'
-      document.body.appendChild(el)
-    }
-    const prev = (window as unknown as { __pvTouchLog?: string[] }).__pvTouchLog || []
-    prev.push(line)
-    if (prev.length > 4) prev.shift()
-    ;(window as unknown as { __pvTouchLog?: string[] }).__pvTouchLog = prev
-    el.textContent = prev.join('\n')
-  } catch {
-    /* 诊断本身不得影响功能 */
-  }
-}
-
 /** 拼接文本层顶层 span 的文本（items 的 str 自带词间空格；.pv-hit 嵌在 leaf 内，
  *  父 span.textContent 已含其文本，只取 :scope > span 不会重复计数） */
 function layerText(el: Element | null): string {
@@ -1678,15 +1654,9 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
         hit || fb
           ? () => {
               const snap = buildQuoteSnap(fb)
-              if (snap) {
-                fireQuote(snap)
-                touchDbg(`open ok text="${snap.text.slice(0, 18)}" p${snap.page}`)
-              } else {
-                touchDbg(`open FAILED（无选区且无兜底）word="${frag}"`)
-              }
+              if (snap) fireQuote(snap)
             }
           : null
-      touchDbg(`lp word="${frag}" hit=${hit ? 1 : 0} loc=${loc ? 1 : 0}`)
     }
     const onTouchStart = (e: TouchEvent) => {
       clearTimer()
@@ -1697,7 +1667,6 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
       pendingOpen = null
       setManualSel(null) // 新触摸开始即清几何兜底选区（新长按会重建）
       if (e.touches.length !== 1) return // 多指=捏合缩放，不算长按
-      touchDbg(`start coarse=1 touch=1`)
       const t = e.touches[0]
       sx = t.clientX
       sy = t.clientY
@@ -1727,7 +1696,6 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     // 否而会把 300ms 级的「慢一点的 tap」也算成长按（实测 327ms 的 tap 曾被误判开卡）。
     const endLongPressFallback = (held: number) => {
       if (fired || !armed || held < 340 || moved <= 12 || moved > 20) return false
-      touchDbg(`兜底长按 held=${held}ms moved=${Math.round(moved)}px`)
       longPress(lastX, lastY)
       return fired
     }
@@ -1743,11 +1711,9 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
         e.preventDefault()
         const open = pendingOpen
         pendingOpen = null
-        touchDbg(`end fired=1 held=${held}ms`)
         open?.()
         return
       }
-      touchDbg(`end fired=0 held=${held}ms moved=${Math.round(moved)}px`)
       // 快速 tap：清程序化选区
       const sel = window.getSelection()
       if (sel && !sel.isCollapsed) sel.removeAllRanges()
@@ -1762,7 +1728,6 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
       armed = false
       const open = pendingOpen
       pendingOpen = null
-      touchDbg(`cancel fired=${fired ? 1 : 0} held=${held}ms`)
       if (fired) open?.()
     }
     el.addEventListener('touchstart', onTouchStart, { passive: true })
