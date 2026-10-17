@@ -31,6 +31,10 @@ export default function App() {
   const [annoError, setAnnoError] = useState('')
   // 批注气泡上的操作（改/删）失败时的轻提示：气泡里没有位置展示错误，4s 自动消失
   const [annoToast, setAnnoToast] = useState('')
+  // 阅读主题（pj13.theme）：暗色 = UI 深色变量 + PDF 画布反色（借鉴 PdfCraft 的 reading colours）
+  const [theme, setTheme] = useState<'light' | 'dark'>(() =>
+    localStorage.getItem('pj13.theme') === 'dark' ? 'dark' : 'light',
+  )
   // 缩放持久化（pj13.scale）：初始取上次会话的缩放，越界/缺省回 1
   const [scale, setScale] = useState(() => {
     const v = parseFloat(localStorage.getItem('pj13.scale') ?? '')
@@ -176,6 +180,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('pj13.scale', String(scale))
   }, [scale])
+
+  useEffect(() => {
+    localStorage.setItem('pj13.theme', theme)
+  }, [theme])
 
   // 批注操作失败的轻提示：4s 自动消失
   useEffect(() => {
@@ -360,10 +368,20 @@ export default function App() {
     setCard({ note, word: note.surface })
   }
 
+  // 搜索命中 → 新建批注（沿用同一张 AnnoComposer；quote/锚点来自搜索索引的末行）
+  const handleSearchAnno = useCallback(
+    (a: { page: number; quote: string; rect: [number, number, number, number]; screen: ScreenRect }) => {
+      setAnnoError('')
+      setEditingAnno(null)
+      setAnnoDraft({ page: a.page, rect: a.rect, quote: a.quote, x: a.screen.x, y: a.screen.y })
+    },
+    [],
+  )
+
   const reading = !!pdfPath
 
   return (
-    <div className="pv-app">
+    <div className="pv-app" data-theme={theme}>
       <TopBar
         dir={dir}
         listing={listing}
@@ -377,6 +395,10 @@ export default function App() {
         drawerOpen={drawerOpen}
         onToggleDrawer={() => setDrawerOpen((v) => !v)}
         loadState={loadState}
+        theme={theme}
+        onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+        onOpenSearch={() => viewerRef.current?.openSearch()}
+        onToggleOutline={() => viewerRef.current?.toggleOutline()}
       />
       <div className="pv-body">
         <main className="pv-main">
@@ -399,6 +421,7 @@ export default function App() {
               onLoadState={setLoadState}
               onAnnoEdit={handleAnnoEdit}
               onAnnoDelete={handleAnnoDelete}
+              onSearchAnno={handleSearchAnno}
             />
           ) : (
             <Catalog

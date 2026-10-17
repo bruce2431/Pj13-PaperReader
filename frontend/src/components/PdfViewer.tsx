@@ -13,13 +13,20 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { AnnoNote, VocabNote, ScreenRect } from '../types'
 import { isTouchUI } from '../touch'
+import { extractPageText, findHits, type PageText, type SearchHit } from '../search'
 import { AnnoLayer } from './AnnoLayer'
+import { SearchBar } from './SearchBar'
+import { OutlinePanel, type OutlineItem } from './OutlinePanel'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
 export interface PdfViewerHandle {
   scrollToPage(page: number): void
   fitWidth(): void
+  /** Ctrl/⌘+F / 顶栏「搜索」：唤出全文搜索条 */
+  openSearch(): void
+  /** 顶栏「目录」：开关 PDF 大纲侧栏 */
+  toggleOutline(): void
 }
 
 /** 生成中的词（App 的 busy 卡对应，可多个并行）：带生成语境（原句 + 页码 + 点击点
@@ -86,6 +93,8 @@ interface PdfViewerProps {
   onAnnoEdit: (anno: AnnoNote, at: { x: number; y: number }) => void
   /** 批注气泡「删除」（气泡内已二次确认） */
   onAnnoDelete: (anno: AnnoNote) => void
+  /** 搜索条「批注」：用当前命中的原文与末行归一化矩形打开 AnnoComposer（借鉴 PdfCraft 的 find→comment） */
+  onSearchAnno?: (a: { page: number; quote: string; rect: [number, number, number, number]; screen: ScreenRect }) => void
 }
 
 /** 词字符判定（词界 = 非词字符）：字母/数字 + ASCII 连字符。连字符必须算词字符——
@@ -1041,6 +1050,9 @@ function PageView({
   linesMap,
   pendingWords,
   manualSel,
+  searchHits,
+  activeHit,
+  onSized,
 }: {
   pdf: PDFDocumentProxy
   pageNumber: number
@@ -1049,6 +1061,12 @@ function PageView({
   linesMap: Map<number, Line[]>
   pendingWords?: PendingWord[]
   manualSel?: { page: number; rects: WordMark[] } | null
+  /** 全文搜索命中（全文档；本组件按 pageNumber 过滤） */
+  searchHits?: SearchHit[]
+  /** 当前激活命中在整个结果列表中的下标 */
+  activeHit?: number
+  /** 占位尺寸就绪：父级用它判断目录跳转时 offsetTop 是否已稳定 */
+  onSized?: (page: number) => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
@@ -1149,13 +1167,16 @@ function PageView({
       .getPage(pageNumber)
       .then((p) => {
         const vp = p.getViewport({ scale })
-        if (!cancelled) setSize({ w: vp.width, h: vp.height })
+        if (!cancelled) {
+          setSize({ w: vp.width, h: vp.height })
+          onSized?.(pageNumber)
+        }
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [pdf, pageNumber, scale])
+  }, [pdf, pageNumber, scale, onSized])
 
   // 视口相交才渲染（滚动到附近触发）。等 size 就位再观察：占位期页面高 1px，
   // 直接观察会把所有页都判为「相交」→ 启动时也就全渲染了（user 反馈慢）。
@@ -1268,6 +1289,22 @@ function PageView({
           {pageNumber}
         </div>
       )}
+      {/* 全文搜索高亮：坐标是页面归一化矩形，缩放无关；未渲染的页也能显示 */}
+      {size && searchHits?.length ? (
+        <div className="pv-search">
+          {searchHits.map((h, i) =>
+            h.page !== pageNumber
+              ? null
+              : h.rects.map((r, j) => (
+                  <div
+                    key={`${i}-${j}`}
+                    className={`pv-search-hit${activeHit === i ? ' active' : ''}`}
+                    style={{ left: r[0] * size.w, top: r[1] * size.h, width: r[2] * size.w, height: r[3] * size.h }}
+                  />
+                )),
+          )}
+        </div>
+      ) : null}
       {visible && (
         <>
           <canvas ref={canvasRef} />
@@ -1320,7 +1357,7 @@ function PageView({
 }
 
 export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function PdfViewer(
-  { src, notes, annos, scale, shrinkToFitOnLoad = true, pendingWords, onScaleChange, onWordOpen, onQuote, onQuoteClose, onPageChange, onPageCount, onLoadState, onAnnoEdit, onAnnoDelete },
+  { src, notes, annos, scale, shrinkToFitOnLoad = true, pendingWords, onScaleChange, onWordOpen, onQuote, onQuoteClose, onPageChange, onPageCount, onLoadState, onAnnoEdit, onAnnoDelete, onSearchAnno },
   ref,
 ) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -1331,6 +1368,75 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
   const [pages, setPages] = useState<number[]>([])
   // 触屏长按的几何兜底选区（caret 不可用时按采样几何直接画蓝底，页码 + 页内矩形）
   const [manualSel, setManualSel] = useState<{ page: number; rects: WordMark[] } | null>(null)
+  // 全文搜索（借鉴 PdfCraft）：页面文本索引缓存 → 命中列表 → 当前条
+  const textCache = useRef(new Map<number, PageText>())
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([])
+  const [activeHit, setActiveHit] = useState(-1)
+  const [searching, setSearching] = useState(false)
+  // PDF 自带目录（getOutline 解析成扁平列表）
+  const [outline, setOutline] = useState<OutlineItem[]>([])
+  const [outlineOpen, setOutlineOpen] = useState(false)
+  const [outlineLoading, setOutlineLoading] = useState(false)
+  // 目录跳转的布局校正：占位尺寸异步就绪，页面高从 1px 变成真实值会把目标页顶推送下移；
+  // 记录已就绪页码，等目标页之前的页全部就绪后再对齐一次（否则会停在上一页中段、顶栏页码也对不上）
+  const sizeReady = useRef(new Set<number>())
+  const pendingJump = useRef<{ page: number; top: number } | null>(null)
+  const [layoutTick, setLayoutTick] = useState(0)
+  const onPageSized = useCallback((page: number) => {
+    sizeReady.current.add(page)
+    setLayoutTick((v) => v + 1)
+  }, [])
+
+  const scrollToTarget = useCallback((page: number, top: number) => {
+    const el = scrollRef.current
+    const pageEl = el?.querySelector<HTMLElement>(`.pv-page[data-page="${page}"]`)
+    if (!el || !pageEl) return
+    // top=0 用页顶；目录落点留 6px 呼吸位，免得标题贴住顶栏
+    const y = pageEl.offsetTop + top * pageEl.offsetHeight - (top > 0 ? 6 : 1)
+    el.scrollTo({ top: Math.max(0, y), left: el.scrollLeft, behavior: 'auto' })
+  }, [])
+
+  const jumpToPage = useCallback(
+    (page: number, top = 0) => {
+      pendingJump.current = { page, top }
+      scrollToTarget(page, top)
+    },
+    [scrollToTarget],
+  )
+
+  // 页面尺寸变化（懒占位 → 真实高度）后，若还有未完成的跳转则重新对齐
+  useEffect(() => {
+    const target = pendingJump.current
+    if (!target) return
+    for (let i = 1; i < target.page; i++) if (!sizeReady.current.has(i)) return
+    const el = scrollRef.current
+    const pageEl = el?.querySelector<HTMLElement>(`.pv-page[data-page="${target.page}"]`)
+    if (!el || !pageEl) return
+    pendingJump.current = null
+    const want = Math.max(0, pageEl.offsetTop + target.top * pageEl.offsetHeight - (target.top > 0 ? 6 : 1))
+    if (Math.abs(el.scrollTop - want) > 4) el.scrollTo({ top: want, left: el.scrollLeft, behavior: 'auto' })
+  }, [layoutTick])
+
+  // 用户主动滚动/按键则取消待校正的跳转，避免尺寸晚到把人拽回目标页
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const cancel = () => {
+      pendingJump.current = null
+    }
+    el.addEventListener('wheel', cancel, { passive: true })
+    el.addEventListener('touchstart', cancel, { passive: true })
+    el.addEventListener('pointerdown', cancel)
+    el.addEventListener('keydown', cancel)
+    return () => {
+      el.removeEventListener('wheel', cancel)
+      el.removeEventListener('touchstart', cancel)
+      el.removeEventListener('pointerdown', cancel)
+      el.removeEventListener('keydown', cancel)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -1338,6 +1444,12 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     setPages([])
     setManualSel(null)
     linesMap.current.clear() // 换 PDF：旧文档的行文本对新文档是脏数据
+    textCache.current.clear() // 搜索索引同理
+    sizeReady.current.clear() // 新文档页高未就绪
+    pendingJump.current = null
+    setSearchHits([])
+    setActiveHit(-1)
+    setOutline([])
     onLoadState?.('loading')
     if (!src) return
     pdfjsLib
@@ -1360,6 +1472,156 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src])
+
+  // ---------- PDF 目录（大纲）----------
+  // pdfjs 的 dest 可能是命名字符串或数组；解析失败只保留标题、禁用跳转
+  useEffect(() => {
+    if (!pdf) {
+      setOutline([])
+      return
+    }
+    let cancelled = false
+    setOutlineLoading(true)
+    ;(async () => {
+      try {
+        const raw = await pdf.getOutline()
+        const flat: OutlineItem[] = []
+        const walk = async (items: any[], depth: number): Promise<void> => {
+          for (const it of items) {
+            if (cancelled) return
+            let page: number | null = null
+            let top: number | null = null
+            try {
+              let dest: any = it.dest
+              if (typeof dest === 'string') dest = await pdf.getDestination(dest)
+              if (Array.isArray(dest) && dest[0]) {
+                page = (await pdf.getPageIndex(dest[0])) + 1
+                // 目录项自带页内落点（XYZ/FitH/FitBH 的第 2/3 个参数是 top）：
+                // 只滚到页顶会落在标题之前的续文上，点「Training」看不到标题
+                const kind = dest[1]?.name
+                const rawTop = kind === 'XYZ' ? dest[3] : kind === 'FitH' || kind === 'FitBH' ? dest[2] : null
+                if (typeof rawTop === 'number') {
+                  const p = await pdf.getPage(page)
+                  const vp = p.getViewport({ scale: 1 })
+                  const [, vy] = vp.convertToViewportPoint(0, rawTop)
+                  top = Math.max(0, Math.min(1, vy / vp.height))
+                }
+              }
+            } catch {
+              /* 目标解析失败：保留条目但不可跳转 */
+            }
+            flat.push({ title: String(it.title || ''), page, top, depth })
+            if (Array.isArray(it.items) && it.items.length) await walk(it.items, depth + 1)
+          }
+        }
+        if (raw?.length) await walk(raw, 0)
+        if (!cancelled) setOutline(flat)
+      } catch (e) {
+        if (!cancelled) {
+          console.warn('outline unavailable', e)
+          setOutline([])
+        }
+      } finally {
+        if (!cancelled) setOutlineLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [pdf])
+
+  // ---------- 全文搜索 ----------
+  // 索引用 textContent 建（不要求页面已渲染）；命中几何按页归一化，缩放无需重算。
+  // 输入防抖 220ms；换 query 时旧任务由 cancelled 丢弃。
+  useEffect(() => {
+    if (!pdf || !searchOpen || !searchQuery.trim()) {
+      setSearchHits([])
+      setActiveHit(-1)
+      setSearching(false)
+      return
+    }
+    let cancelled = false
+    setSearching(true)
+    const q = searchQuery
+    const timer = window.setTimeout(() => {
+      ;(async () => {
+        const all: SearchHit[] = []
+        try {
+          for (let p = 1; p <= pdf.numPages; p++) {
+            let pt = textCache.current.get(p)
+            if (!pt) {
+              pt = await extractPageText(pdf, p)
+              textCache.current.set(p, pt)
+            }
+            if (cancelled) return
+            all.push(...findHits(pt, q, p))
+          }
+          if (cancelled) return
+          setSearchHits(all)
+          setActiveHit(all.length ? 0 : -1)
+        } catch (e) {
+          if (!cancelled) console.error('search failed', e)
+        } finally {
+          if (!cancelled) setSearching(false)
+        }
+      })()
+    }, 220)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [pdf, searchOpen, searchQuery])
+
+  // 当前命中滚入视口（纵向 + 放大后的横向）
+  useEffect(() => {
+    if (!searchOpen || activeHit < 0) return
+    const hit = searchHits[activeHit]
+    const el = scrollRef.current
+    if (!hit || !el) return
+    const pageEl = el.querySelector<HTMLElement>(`.pv-page[data-page="${hit.page}"]`)
+    if (!pageEl) return
+    const r = hit.rects[0]
+    const top = pageEl.offsetTop + r[1] * pageEl.offsetHeight - Math.min(160, el.clientHeight * 0.25)
+    const left = pageEl.offsetLeft + r[0] * pageEl.offsetWidth - Math.min(120, el.clientWidth * 0.2)
+    el.scrollTo({ top: Math.max(0, top), left: Math.max(0, left), behavior: 'smooth' })
+  }, [searchOpen, activeHit, searchHits])
+
+  // Ctrl/⌘+F（iframe 内全局）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  const goHit = useCallback(
+    (delta: number) => {
+      const n = searchHits.length
+      if (!n) return
+      setActiveHit((i) => (i < 0 ? 0 : (i + delta + n) % n))
+    },
+    [searchHits.length],
+  )
+
+  // 当前命中 → 批注：末行矩形作锚点，屏幕矩形用于摆放编辑卡
+  const annoFromHit = useCallback(() => {
+    if (!onSearchAnno || activeHit < 0) return
+    const hit = searchHits[activeHit]
+    if (!hit) return
+    const el = scrollRef.current
+    const pageEl = el?.querySelector<HTMLElement>(`.pv-page[data-page="${hit.page}"]`)
+    const r = hit.rects[hit.rects.length - 1]
+    let screen: ScreenRect = { x: window.innerWidth / 2 - 40, y: window.innerHeight / 3, w: 80, h: 24 }
+    if (el && pageEl) {
+      const pr = pageEl.getBoundingClientRect()
+      screen = { x: pr.left + r[0] * pr.width, y: pr.top + r[1] * pr.height, w: r[2] * pr.width, h: r[3] * pr.height }
+    }
+    onSearchAnno({ page: hit.page, quote: hit.quote, rect: r, screen })
+  }, [activeHit, searchHits, onSearchAnno])
 
   // 载入后防横向溢出（user 反馈 iPad 上 PDF 可左右滑）：iPad 竖屏减去 320px 生词
   // 抽屉后 PDF 区常不足 612px（letter @1x 页宽）→ 页面真实横向溢出、可左右滑。
@@ -1405,16 +1667,23 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     const onScroll = () => {
       if (!onPageChange) return
       const pagesEls = Array.from(el.querySelectorAll<HTMLElement>('.pv-page'))
-      let best = 1
+      const st = el.scrollTop
+      let nearest = 1
       let bestDist = Infinity
+      let atTop: number | null = null
       for (const p of pagesEls) {
-        const d = Math.abs(p.offsetTop - el.scrollTop)
+        const n = Number(p.dataset.page) || 1
+        const top = p.offsetTop
+        const d = Math.abs(top - st)
         if (d < bestDist) {
           bestDist = d
-          best = Number(p.dataset.page) || 1
+          nearest = n
         }
+        // 顶栏按「视口顶部所在页」计，而不是「页顶距离最近」：后者在页尾时
+        // 会提前跳到下一页（目录跳转停在上一页中段时页码看着像错位）
+        if (st + 1 >= top && st < top + p.offsetHeight) atTop = n
       }
-      onPageChange(best)
+      onPageChange(atTop ?? nearest)
     }
     el.addEventListener('scroll', onScroll)
     return () => el.removeEventListener('scroll', onScroll)
@@ -1745,8 +2014,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
 
   useImperativeHandle(ref, () => ({
     scrollToPage(page: number) {
-      const el = scrollRef.current?.querySelector<HTMLElement>(`.pv-page[data-page="${page}"]`)
-      el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      jumpToPage(page)
     },
     fitWidth() {
       const el = scrollRef.current
@@ -1763,6 +2031,12 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
           onScaleChange(next)
         })
         .catch(() => {})
+    },
+    openSearch() {
+      setSearchOpen(true)
+    },
+    toggleOutline() {
+      setOutlineOpen((v) => !v)
     },
   }))
 
@@ -1822,22 +2096,51 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
   }
 
   return (
-    <div className="pv-scroll" ref={scrollRef} onMouseUp={handleMouseUp} onClick={handleTap}>
-      {pages.length === 0 && <div className="pv-hint">正在加载 PDF…</div>}
-      {pages.map((n) => (
-        <PageView
-          key={`${src}-${n}`}
-          pdf={pdf!}
-          pageNumber={n}
-          scale={scale}
-          notes={notes}
-          linesMap={linesMap.current}
-          pendingWords={pendingWords}
-          manualSel={manualSel}
+    <>
+      <div className="pv-scroll" ref={scrollRef} onMouseUp={handleMouseUp} onClick={handleTap}>
+        {pages.length === 0 && <div className="pv-hint">正在加载 PDF…</div>}
+        {pages.map((n) => (
+          <PageView
+            key={`${src}-${n}`}
+            pdf={pdf!}
+            pageNumber={n}
+            scale={scale}
+            notes={notes}
+            linesMap={linesMap.current}
+            pendingWords={pendingWords}
+            manualSel={manualSel}
+            searchHits={searchHits}
+            activeHit={activeHit}
+            onSized={onPageSized}
+          />
+        ))}
+        {/* 批注层：绝对定位在滚动内容坐标系里（随 PDF 一起滚动），渲染在页之上 */}
+        <AnnoLayer annos={annos} scrollerRef={scrollRef} scale={scale} onEdit={onAnnoEdit} onDelete={onAnnoDelete} />
+      </div>
+      {searchOpen && (
+        <SearchBar
+          query={searchQuery}
+          onQuery={setSearchQuery}
+          count={searchHits.length}
+          active={activeHit}
+          searching={searching}
+          onPrev={() => goHit(-1)}
+          onNext={() => goHit(1)}
+          onClose={() => setSearchOpen(false)}
+          onAnno={annoFromHit}
         />
-      ))}
-      {/* 批注层：绝对定位在滚动内容坐标系里（随 PDF 一起滚动），渲染在页之上 */}
-      <AnnoLayer annos={annos} scrollerRef={scrollRef} scale={scale} onEdit={onAnnoEdit} onDelete={onAnnoDelete} />
-    </div>
+      )}
+      {outlineOpen && (
+        <OutlinePanel
+          items={outline}
+          loading={outlineLoading}
+          onPick={(page, top) => {
+            setOutlineOpen(false)
+            jumpToPage(page, top ?? 0)
+          }}
+          onClose={() => setOutlineOpen(false)}
+        />
+      )}
+    </>
   )
 })

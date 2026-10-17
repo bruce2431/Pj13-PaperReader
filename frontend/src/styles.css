@@ -62,6 +62,10 @@ button {
   display: flex;
   flex-direction: column;
   position: relative;
+  /* 主题变量挂在 .pv-app 上，body 的 color 读不到暗色值；
+     这里显式继承，否则暗色下标题/目录行名仍是近黑字 */
+  background: var(--bg);
+  color: var(--text);
 }
 
 /* ---------------- 顶栏 ---------------- */
@@ -1196,4 +1200,166 @@ button {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+/* ---------------- 全文搜索（借鉴 PdfCraft） ---------------- */
+.pv-search {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pv-search-hit {
+  position: absolute;
+  background: rgba(255, 214, 10, 0.32);
+  border-radius: 2px;
+}
+.pv-search-hit.active {
+  background: rgba(255, 149, 0, 0.46);
+  box-shadow: 0 0 0 1.5px rgba(255, 149, 0, 0.85);
+}
+.pv-searchbar {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+.pv-search-icon {
+  display: inline-flex;
+  color: var(--text-3);
+  flex: none;
+}
+.pv-search-input {
+  width: 200px;
+  max-width: 38vw;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 0;
+}
+.pv-search-input::placeholder {
+  color: var(--text-3);
+}
+.pv-search-count {
+  flex: none;
+  min-width: 52px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/* ---------------- PDF 目录侧栏（借鉴 PdfCraft 的 Bookmarks） ---------------- */
+.pv-outline {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  bottom: 12px;
+  z-index: 40;
+  width: 300px;
+  max-width: 72%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.pv-outline-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.pv-outline-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.pv-outline-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.pv-outline-head .pv-card-close {
+  margin-left: auto;
+}
+.pv-outline-body {
+  flex: 1;
+  overflow: auto;
+  padding: 6px;
+}
+.pv-outline-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pv-outline-item:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.pv-outline-item.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.pv-outline-empty {
+  padding: 18px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ---------------- 暗色阅读主题（UI 深色 + PDF 画布反色） ---------------- */
+.pv-app[data-theme='dark'] {
+  --bg: #151517;
+  --panel: #1d1d21;
+  --rail-bg: #101012;
+  --border: #2c2c32;
+  --border-soft: #25252a;
+  --text: #e8e8ec;
+  --text-2: #a2a2ac;
+  --text-3: #63636d;
+  --hover: #26262c;
+  --active: #313138;
+  --shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+.pv-app[data-theme='dark'] .pv-page {
+  background: #1a1a1e;
+  border-color: #303036;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+/* 画布反色：正文变暗底亮字；图片/彩色插图也会反相（纯前端方案无法区分文字与图像） */
+.pv-app[data-theme='dark'] .pv-page canvas {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.92);
+}
+.pv-app[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: #3a3a42;
+  border-color: var(--rail-bg);
+}
+.pv-app[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: #4a4a54;
 }

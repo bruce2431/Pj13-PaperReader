@@ -19,6 +19,13 @@ interface TopBarProps {
   drawerOpen: boolean
   onToggleDrawer: () => void
   loadState: 'loading' | 'ready' | 'error'
+  /** 阅读主题：原色 / 暗色（PDF 画布反色，UI 同步换深色变量） */
+  theme: 'light' | 'dark'
+  onToggleTheme: () => void
+  /** 唤出全文搜索条（Ctrl/⌘+F） */
+  onOpenSearch: () => void
+  /** 开关 PDF 目录侧栏 */
+  onToggleOutline: () => void
 }
 
 export function TopBar({
@@ -34,6 +41,10 @@ export function TopBar({
   drawerOpen,
   onToggleDrawer,
   loadState,
+  theme,
+  onToggleTheme,
+  onOpenSearch,
+  onToggleOutline,
 }: TopBarProps) {
   // 面包屑 = 素材库 / 逐层目录（读 PDF 时把文件名接在末尾）
   const segs = dir ? listing?.path?.split('/') ?? dir.split('/') : []
@@ -82,6 +93,16 @@ export function TopBar({
       <div className="pv-topbar-right">
         {reading && (
           <>
+            <button className="pv-icon-btn" onClick={onOpenSearch} title="搜索全文（Ctrl/⌘+F）">
+              搜索
+            </button>
+            <button className="pv-icon-btn" onClick={onToggleOutline} title="打开 PDF 目录">
+              目录
+            </button>
+            <button className="pv-icon-btn" onClick={onToggleTheme} title={theme === 'dark' ? '切回原色' : '暗色阅读（反色）'}>
+              {theme === 'dark' ? '原色' : '暗色'}
+            </button>
+            <span className="pv-topbar-sep" />
             <span className="pv-page-info">{pageCount ? `${page} / ${pageCount}` : '—'}</span>
             <span className="pv-topbar-sep" />
             <button className="pv-icon-btn" onClick={onFitWidth} title="适合宽度">
